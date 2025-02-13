@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Merger Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.min.js"></script>
+</head>
+<body>
+    <!-- Add this custom element anywhere in your WordPress site -->
+    <audio-merger-pro></audio-merger-pro>
+
+    <script>
+        class AudioMergerPro extends HTMLElement {
+            constructor() {
+                super();
+                this.attachShadow({ mode: 'open' });
+                this.shadowRoot.innerHTML = `
+                    <style>
+                        * {
+                            box-sizing: border-box;
+                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                            margin: 0;
+                            padding: 0;
+                        }
+
+                        :host {
+                            display: block;
+                            max-width: 800px;
+                            margin: 20px auto;
+                            padding: 20px;
+                            background: #f0f2f5;
+                        }
+
+                        .container {
+                            background: white;
+                            padding: 25px;
+                            border-radius: 12px;
+                            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+                            margin-bottom: 30px;
+                        }
+
+                        .drop-zone {
+                            border: 3px dashed #4CAF50;
+                            border-radius: 10px;
+                            padding: 30px;
+                            text-align: center;
+                            margin: 20px 0;
+                            transition: 0.3s;
+                        }
+
+                        .drop-zone.dragover {
+                            background: #e8f5e9;
+                            border-color: #2E7D32;
+                        }
+
+                        .file-list {
+                            margin: 20px 0;
+                            padding: 0;
+                            list-style: none;
+                        }
+
+                        .file-item {
+                            display: flex;
+                            align-items: center;
+                            padding: 12px;
+                            margin: 8px 0;
+                            background: #f8f9fa;
+                            border-radius: 6px;
+                        }
+
+                        .drag-handle {
+                            cursor: move;
+                            padding: 0 15px;
+                            color: #666;
+                        }
+
+                        .controls {
+                            display: flex;
+                            gap: 10px;
+                            margin-top: 20px;
+                        }
+
+                        button {
+                            background: #4CAF50;
+                            color: white;
+                            border: none;
+                            padding: 12px 24px;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            transition: 0.3s;
+                        }
+
+                        button:hover {
+                            background: #45a049;
+                        }
+
+                        button:disabled {
+                            background: #a5d6a7;
+                            cursor: not-allowed;
+                        }
+
+                        .progress-bar {
+                            height: 20px;
+                            background: #eee;
+                            border-radius: 10px;
+                            overflow: hidden;
+                            margin: 20px 0;
+                        }
+
+                        .progress-fill {
+                            height: 100%;
+                            background: #4CAF50;
+                            transition: width 0.3s ease;
+                        }
+
+                        .format-selector {
+                            margin: 15px 0;
+                            padding: 10px;
+                            border: 1px solid #ddd;
+                            border-radius: 5px;
+                        }
+                    </style>
+                    <div class="container">
+                        <h1><i class="fas fa-waveform"></i> Audio Merger Pro 🎵</h1>
+                        <div class="drop-zone" id="dropZone">
+                            <i class="fas fa-file-upload fa-2x"></i><br>
+                            Drag & Drop Audio Files Here<br>
+                            or<br>
+                            <input type="file" id="fileInput" accept="audio/*" multiple>
+                            <label for="fileInput" class="browse-button">Browse Files</label>
+                        </div>
+                        
+                        <ul class="file-list" id="fileList"></ul>
+
+                        <div class="format-selector">
+                            <label>Output Format: </label>
+                            <select id="outputFormat">
+                                <option value="wav">WAV</option>
+                                <option value="mp3">MP3</option>
+                            </select>
+                        </div>
+
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressBar" style="width: 0%"></div>
+                        </div>
+
+                        <div class="controls">
+                            <button id="mergeButton" disabled><i class="fas fa-random"></i> Merge Files</button>
+                            <button id="clearButton"><i class="fas fa-trash"></i> Clear All</button>
+                        </div>
+                    </div>
+                `;
+
+                // Initialize component
+                this.files = [];
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            connectedCallback() {
+                this.initializeComponents();
+                this.loadFontAwesome();
+            }
+
+            loadFontAwesome() {
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css';
+                this.shadowRoot.appendChild(link);
+            }
+
+            initializeComponents() {
+                this.dropZone = this.shadowRoot.getElementById('dropZone');
+                this.fileInput = this.shadowRoot.getElementById('fileInput');
+                this.fileList = this.shadowRoot.getElementById('fileList');
+                this.mergeButton = this.shadowRoot.getElementById('mergeButton');
+                this.clearButton = this.shadowRoot.getElementById('clearButton');
+                this.progressBar = this.shadowRoot.getElementById('progressBar');
+                this.outputFormat = this.shadowRoot.getElementById('outputFormat');
+
+                // Event listeners
+                this.dropZone.addEventListener('dragover', this.handleDragOver.bind(this));
+                this.dropZone.addEventListener('dragleave', this.handleDragLeave.bind(this));
+                this.dropZone.addEventListener('drop', this.handleDrop.bind(this));
+                this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+                this.clearButton.addEventListener('click', this.clearAll.bind(this));
+                this.mergeButton.addEventListener('click', this.mergeFiles.bind(this));
+            }
+
+            handleDragOver(e) {
+                e.preventDefault();
+                this.dropZone.classList.add('dragover');
+            }
+
+            handleDragLeave() {
+                this.dropZone.classList.remove('dragover');
+            }
+
+            handleDrop(e) {
+                e.preventDefault();
+                this.dropZone.classList.remove('dragover');
+                this.handleFiles(e.dataTransfer.files);
+            }
+
+            handleFileSelect(e) {
+                this.handleFiles(e.target.files);
+            }
+
+            handleFiles(newFiles) {
+                this.files = [...this.files, ...Array.from(newFiles)];
+                this.renderFileList();
+                this.mergeButton.disabled = this.files.length === 0;
+            }
+
+            renderFileList() {
+                this.fileList.innerHTML = '';
+                this.files.forEach((file, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'file-item';
+                    li.draggable = true;
+                    li.innerHTML = `
+                        <div class="drag-handle">☰</div>
+                        <span>${index + 1}. ${file.name}</span>
+                    `;
+
+                    li.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.setData('text/plain', index);
+                    });
+
+                    li.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                    });
+
+                    li.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                        const toIndex = index;
+                        this.swapFiles(fromIndex, toIndex);
+                    });
+
+                    this.fileList.appendChild(li);
+                });
+            }
+
+            swapFiles(fromIndex, toIndex) {
+                [this.files[fromIndex], this.files[toIndex]] = [this.files[toIndex], this.files[fromIndex]];
+                this.renderFileList();
+            }
+
+            clearAll() {
+                this.files = [];
+                this.renderFileList();
+                this.mergeButton.disabled = true;
+                this.progressBar.style.width = '0%';
+            }
+
+            async mergeFiles() {
+                if (this.files.length < 1) return;
+
+                this.mergeButton.disabled = true;
+                this.mergeButton.textContent = 'Processing...';
+                
+                try {
+                    const audioBuffers = [];
+                    let totalLength = 0;
+                    let sampleRate = 44100;
+
+                    // Decode all files
+                    for (let i = 0; i < this.files.length; i++) {
+                        const arrayBuffer = await this.files[i].arrayBuffer();
+                        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                        audioBuffers.push(audioBuffer);
+                        sampleRate = audioBuffer.sampleRate;
+                        this.progressBar.style.width = `${((i + 1) / this.files.length * 50)}%`;
+                    }
+
+                    // Create merged buffer
+                    totalLength = audioBuffers.reduce((sum, buffer) => sum + buffer.length, 0);
+                    const mergedBuffer = this.audioContext.createBuffer(
+                        Math.max(...audioBuffers.map(b => b.numberOfChannels)),
+                        totalLength,
+                        sampleRate
+                    );
+
+                    // Merge audio data
+                    let offset = 0;
+                    for (const buffer of audioBuffers) {
+                        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+                            mergedBuffer.getChannelData(channel)
+                                .set(buffer.getChannelData(channel), offset);
+                        }
+                        offset += buffer.length;
+                        this.progressBar.style.width = `${50 + (offset / totalLength * 50)}%`;
+                    }
+
+                    // Export to selected format
+                    const format = this.outputFormat.value;
+                    let blob;
+                    if (format === 'wav') {
+                        blob = this.audioBufferToWav(mergedBuffer);
+                    } else {
+                        blob = await this.audioBufferToMP3(mergedBuffer);
+                    }
+
+                    // Create download link
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `merged-${Date.now()}.${format}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                } catch (error) {
+                    alert(`Error merging files: ${error.message}`);
+                } finally {
+                    this.mergeButton.disabled = false;
+                    this.mergeButton.textContent = 'Merge Files';
+                    this.progressBar.style.width = '0%';
+                }
+            }
+
+            audioBufferToWav(buffer) {
+                const numChannels = buffer.numberOfChannels;
+                const length = buffer.length * numChannels * 2 + 44;
+                const arrayBuffer = new ArrayBuffer(length);
+                const view = new DataView(arrayBuffer);
+
+                // WAV header
+                this.writeString(view, 0, 'RIFF');
+                view.setUint32(4, 36 + buffer.length * numChannels * 2, true);
+                this.writeString(view, 8, 'WAVE');
+                this.writeString(view, 12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, buffer.sampleRate, true);
+                view.setUint32(28, buffer.sampleRate * numChannels * 2, true);
+                view.setUint16(32, numChannels * 2, true);
+                view.setUint16(34, 16, true);
+                this.writeString(view, 36, 'data');
+                view.setUint32(40, buffer.length * numChannels * 2, true);
+
+                // Audio data
+                let offset = 44;
+                for (let i = 0; i < buffer.length; i++) {
+                    for (let channel = 0; channel < numChannels; channel++) {
+                        const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+                        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                        offset += 2;
+                    }
+                }
+
+                return new Blob([view], { type: 'audio/wav' });
+            }
+
+            async audioBufferToMP3(buffer) {
+                return new Promise((resolve) => {
+                    const encoder = new lamejs.Mp3Encoder(
+                        buffer.numberOfChannels,
+                        buffer.sampleRate,
+                        128
+                    );
+
+                    const left = buffer.getChannelData(0);
+                    const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left;
+                    const sampleBlockSize = 1152;
+                    const mp3Data = [];
+
+                    for (let i = 0; i < left.length; i += sampleBlockSize) {
+                        const leftChunk = left.subarray(i, i + sampleBlockSize);
+                        const rightChunk = right.subarray(i, i + sampleBlockSize);
+                        const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk);
+                        if (mp3buf.length > 0) mp3Data.push(mp3buf);
+                    }
+
+                    const mp3buf = encoder.flush();
+                    if (mp3buf.length > 0) mp3Data.push(mp3buf);
+
+                    resolve(new Blob(mp3Data, { type: 'audio/mp3' }));
+                });
+            }
+
+            writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+        }
+
+        // Register custom element
+        customElements.define('audio-merger-pro', AudioMergerPro);
+    </script>
+</body>
+</html>
